@@ -109,5 +109,10 @@ func (p *fixCmd) sealResource(rootPath, resource string) error {
 	if err := osRename(resource, dest); err != nil {
 		return err
 	}
-	return symlink(dest, resource)
+	if err := symlink(resource, dest); err != nil {
+		// Symlink failed, try to undo the move
+		osRename(dest, resource)
+		return err
+	}
+	return nil
 }
