@@ -19,6 +19,7 @@ func main() {
 	subcommands.Register(subcommands.CommandsCommand(), "")
 	subcommands.Register(&fixCmd{}, "")
 	subcommands.Register(&signCmd{}, "")
+	subcommands.Register(&notarizeCmd{}, "")
 
 	flag.Parse()
 	ctx := context.Background()

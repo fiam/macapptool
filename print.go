@@ -14,3 +14,7 @@ func verbosePrintf(level int, format string, args ...interface{}) {
 func errPrintf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, format, args...)
 }
+
+func errPrint(err error) {
+	errPrintf("%v\n", err)
+}
