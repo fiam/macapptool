@@ -19,9 +19,10 @@ import (
 
 	"golang.org/x/crypto/ssh/terminal"
 
-	plist "github.com/DHowett/go-plist"
 	"github.com/google/subcommands"
 	"github.com/manifoldco/promptui"
+
+	"howett.net/plist"
 )
 
 var (
