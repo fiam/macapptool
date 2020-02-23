@@ -25,7 +25,8 @@ jobs:
     name: ${{ matrix.os }} @ Go ${{ matrix.go }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: olegtarasov/get-tag@v1
+      - name: Extract tag name
+        uses: olegtarasov/get-tag@v1
         id: tagName
       - name: Set asset name
         run: echo "::set-env name=ASSET_NAME::macapptool-${{ steps.tagName.outputs.tag }}-${{ matrix.asset_suffix }}"
@@ -48,16 +49,6 @@ jobs:
 
       - name: Build
         run: go build
-
-      - name: Extract tag name
-        id: tag
-        uses: actions/github-script@0.2.0
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            return context.payload.ref.replace(/\/refs\/tags\//, '');
-      - name: Echo
-        run: echo ${{ steps.tag.outputs.result }}
 
       - name: Compress (Unix)
         if: matrix.os == 'ubuntu-latest' || matrix.os == 'macos-latest'
