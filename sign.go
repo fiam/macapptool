@@ -76,7 +76,8 @@ func (c *signCmd) signApp(p string) error {
 			return err
 		}
 	}
-	return nil
+	// Verify signature
+	return c.verifySignature(p)
 }
 
 func (c *signCmd) signEntry(root, p string) error {
@@ -92,6 +93,23 @@ func (c *signCmd) signEntry(root, p string) error {
 	}
 	args = append(args, "--sign", c.Identity, p)
 	cmd := exec.Command("codesign", args...)
+	if *dryRun {
+		fmt.Printf("%s\n", strings.Join(cmd.Args, " "))
+		return nil
+	}
+	verbosePrintf(2, "%s\n", strings.Join(cmd.Args, " "))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func (c *signCmd) verifySignature(p string) error {
+	var args []string
+	if *verbose > 0 {
+		args = append(args, "--verbose=10")
+	}
+	args = append(args, "--assess", "--type", "execute", p)
+	cmd := exec.Command("spctl", args...)
 	if *dryRun {
 		fmt.Printf("%s\n", strings.Join(cmd.Args, " "))
 		return nil
