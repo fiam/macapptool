@@ -1,0 +1,77 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - 'v*'
+jobs:
+
+  publish:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go: [1.13]
+        include:
+          - os: ubuntu-latest
+            artifact_name: macapptool
+            asset_suffix: linux-amd64.tar.gz
+          - os: windows-latest
+            artifact_name: macapptool.exe
+            asset_suffix: windows-amd64.zip
+          - os: macos-latest
+            artifact_name: macapptool
+            asset_suffix: macOS-amd64.tar.gz
+
+    name: ${{ matrix.os }} @ Go ${{ matrix.go }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: olegtarasov/get-tag@v1
+        id: tagName
+      - name: Set asset name
+        run: echo "::set-env name=ASSET_NAME::macapptool-${{ steps.tagName.outputs.tag }}-${{ matrix.asset_suffix }}"
+
+      - name: Set up Go ${{ matrix.go }}
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.13
+
+      - name: Set GOPATH, PATH and ENV
+        run: |
+          echo "::set-env name=GOPATH::$(dirname $GITHUB_WORKSPACE)"
+          echo "::set-env name=GO111MODULE::on"
+          echo "::set-env name=GOPROXY::https://proxy.golang.org"
+          echo "::add-path::$(dirname $GITHUB_WORKSPACE)/bin"
+        shell: bash
+
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: Build
+        run: go build
+
+      - name: Extract tag name
+        id: tag
+        uses: actions/github-script@0.2.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            return context.payload.ref.replace(/\/refs\/tags\//, '');
+      - name: Echo
+        run: echo ${{ steps.tag.outputs.result }}
+
+      - name: Compress (Unix)
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'macos-latest'
+        run: tar cjf ${{ env.ASSET_NAME }} ${{ matrix.artifact_name }}
+
+      - name: Compress (Windows)
+        if: matrix.os == 'windows-latest'
+        run: Compress-Archive ${{ matrix.artifact_name }} ${{ env.ASSET_NAME }}
+
+      - name: Upload binary
+        uses: svenstaro/upload-release-action@v1-release
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.ASSET_NAME }}
+          asset_name: ${{ env.ASSET_NAME }}
+          overwrite: true
+          tag: ${{ github.ref }}
