@@ -345,7 +345,8 @@ func (*notarizeCmd) Synopsis() string {
 }
 
 func (*notarizeCmd) Usage() string {
-	return `notarize [-u username][-p password] some.app`
+	return `notarize [-u username][-p password] some.app
+`
 }
 
 func (c *notarizeCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
