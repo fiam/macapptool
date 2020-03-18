@@ -50,6 +50,12 @@ func (c *signCmd) signApp(p string) error {
 		if err != nil {
 			return err
 		}
+		// If the argument is foo.app/,
+		// filepath.Ext() will return an empty
+		// string. Make sure we don't skip it
+		if strings.HasSuffix(path, "/") {
+			path = path[:len(path)-1]
+		}
 		ext := filepath.Ext(path)
 		if info.IsDir() {
 			if ext == ".app" || ext == ".framework" || ext == ".xpc" {
