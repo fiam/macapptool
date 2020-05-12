@@ -20,8 +20,10 @@ func main() {
 	subcommands.Register(&fixCmd{}, "")
 	subcommands.Register(&signCmd{}, "")
 	subcommands.Register(&notarizeCmd{}, "")
+	subcommands.Register(&zipCmd{}, "")
 
 	flag.Parse()
 	ctx := context.Background()
-	os.Exit(int(subcommands.Execute(ctx)))
+	result := subcommands.Execute(ctx)
+	os.Exit(int(result))
 }
