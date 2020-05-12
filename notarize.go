@@ -22,7 +22,7 @@ import (
 	"github.com/google/subcommands"
 	"github.com/manifoldco/promptui"
 
-	"howett.net/plist"
+	"macapptool/internal/plist"
 )
 
 var (
@@ -138,18 +138,13 @@ func findPrimaryBundleID(zipFile string) (string, error) {
 				return "", err
 			}
 			defer ff.Close()
-			data, err := ioutil.ReadAll(ff)
+			plist, err := plist.New(ff)
 			if err != nil {
 				return "", err
 			}
-			var m map[string]interface{}
-			dec := plist.NewDecoder(bytes.NewReader(data))
-			if err := dec.Decode(&m); err != nil {
+			bundleID, err := plist.BundleIdentifier()
+			if err != nil {
 				return "", err
-			}
-			bundleID, ok := m["CFBundleIdentifier"].(string)
-			if !ok {
-				return "", errors.New("Info.plist does not contain a CFBundleIdentifier")
 			}
 			return bundleID, nil
 		}
