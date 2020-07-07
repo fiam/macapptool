@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/subcommands"
 )
@@ -36,7 +37,7 @@ func (c *zipCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 	if f.NArg() != 1 {
 		return subcommands.ExitUsageError
 	}
-	appPath := f.Arg(0)
+	appPath := strings.TrimSuffix(f.Arg(0), "/")
 	if err := c.zipFile(appPath); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return subcommands.ExitFailure
