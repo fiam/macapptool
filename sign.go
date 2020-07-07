@@ -67,6 +67,8 @@ func (c *signCmd) signApp(p string) error {
 			} else {
 				if filepath.Base(filepath.Dir(path)) == "Helpers" {
 					toSign = append(toSign, path)
+				} else if isExecutable(info) {
+					toSign = append(toSign, path)
 				}
 			}
 		}
@@ -83,12 +85,20 @@ func (c *signCmd) signApp(p string) error {
 		}
 	}
 	// Verify signature
-	return c.verifySignature(p)
+	ext := strings.ToLower(filepath.Ext(p))
+	if ext == ".app" || ext == ".framework" {
+		return verifySignature(p)
+	}
+	return nil
 }
 
 func (c *signCmd) signEntry(root, p string) error {
 	rel, _ := filepath.Rel(root, p)
-	verbosePrintf(1, "signing %s\n", rel)
+	name := rel
+	if name == "" {
+		name = root
+	}
+	verbosePrintf(1, "signing %s\n", name)
 	var args []string
 	if *verbose > 0 {
 		args = append(args, "--verbose")
@@ -99,23 +109,6 @@ func (c *signCmd) signEntry(root, p string) error {
 	}
 	args = append(args, "--sign", c.Identity, p)
 	cmd := exec.Command("codesign", args...)
-	if *dryRun {
-		fmt.Printf("%s\n", strings.Join(cmd.Args, " "))
-		return nil
-	}
-	verbosePrintf(2, "%s\n", strings.Join(cmd.Args, " "))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func (c *signCmd) verifySignature(p string) error {
-	var args []string
-	if *verbose > 0 {
-		args = append(args, "--verbose=10")
-	}
-	args = append(args, "--assess", "--type", "execute", p)
-	cmd := exec.Command("spctl", args...)
 	if *dryRun {
 		fmt.Printf("%s\n", strings.Join(cmd.Args, " "))
 		return nil

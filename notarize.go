@@ -34,6 +34,43 @@ var (
 	errUnexpectedFormat = errors.New("unexpect output format from altool")
 )
 
+type payloadReader interface {
+	io.Closer
+	Next() (filename string, err error)
+	Open() (f io.ReadCloser, err error)
+}
+
+type zipPayloadReader struct {
+	r   *zip.ReadCloser
+	pos int
+}
+
+func (r *zipPayloadReader) Close() error {
+	return r.r.Close()
+}
+
+func (r *zipPayloadReader) Next() (string, error) {
+	r.pos++
+	if r.pos >= len(r.r.File) {
+		return "", io.EOF
+	}
+	return r.r.File[r.pos].Name, nil
+}
+
+func (r *zipPayloadReader) Open() (io.ReadCloser, error) {
+	if r.pos >= len(r.r.File) {
+		return nil, io.EOF
+	}
+	return r.r.File[r.pos].Open()
+}
+
+func newZipPayloadReader(zr *zip.ReadCloser) payloadReader {
+	return &zipPayloadReader{
+		r:   zr,
+		pos: -1,
+	}
+}
+
 type notarizationRequest struct {
 	AppPath  string
 	Username string
@@ -92,48 +129,73 @@ func runCommand(args ...string) error {
 	return runCommandOnDir("", args...)
 }
 
-func staple(zipFile string) error {
+func stapleAndVerify(zipFile string) error {
 	// xcrun stapler staple
 	dir, err := ioutil.TempDir("", "notarizer")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	appPath, err := unzipApp(zipFile, dir)
+	p, canStaple, err := unzipPayload(zipFile, dir)
 	if err != nil {
 		return err
 	}
-	if err := runCommand("xcrun", "stapler", "staple", appPath); err != nil {
+
+	if canStaple {
+		if err := runCommand("xcrun", "stapler", "staple", p); err != nil {
+			return err
+		}
+	}
+
+	if err := verifySignature(p); err != nil {
 		return err
 	}
-	if err := runCommand("spctl", "-a", "-v", appPath); err != nil {
-		return err
-	}
-	newZipPath, err := makeAppZip(appPath)
-	if err != nil {
-		return err
-	}
-	// Replace original zip with stapled one
-	if err := os.Rename(newZipPath, zipFile); err != nil {
-		return err
+
+	if canStaple {
+		newZipPath, err := makeAppZip(p)
+		if err != nil {
+			return err
+		}
+		// Replace original zip with stapled one
+		if err := os.Rename(newZipPath, zipFile); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func findPrimaryBundleID(zipFile string) (string, error) {
-	zr, err := zip.OpenReader(zipFile)
-	if err != nil {
-		return "", err
+func findPrimaryBundleID(payload string) (string, error) {
+	var pr payloadReader
+	switch strings.ToLower(filepath.Ext(payload)) {
+	case ".zip":
+		zr, err := zip.OpenReader(payload)
+		if err != nil {
+			return "", err
+
+		}
+		pr = newZipPayloadReader(zr)
+	default:
+		return "", fmt.Errorf("can't read payload with extension %q", filepath.Ext(payload))
 	}
-	defer zr.Close()
-	for _, f := range zr.File {
-		parts := strings.Split(f.Name, "/")
+	count := 0
+	var last string
+	for {
+		filename, err := pr.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", err
+		}
+		last = filename
+		count++
+		parts := strings.Split(filename, "/")
 		if len(parts) == 3 &&
 			filepath.Ext(parts[0]) == ".app" &&
 			parts[1] == "Contents" &&
 			parts[2] == "Info.plist" {
 
-			ff, err := f.Open()
+			ff, err := pr.Open()
 			if err != nil {
 				return "", err
 			}
@@ -149,22 +211,26 @@ func findPrimaryBundleID(zipFile string) (string, error) {
 			return bundleID, nil
 		}
 	}
+	if count == 1 && strings.IndexByte(last, '/') < 0 {
+		// Single file zip, likely command line executable
+		return "com.example." + last, nil
+	}
 	return "", errors.New("could not find Info.plist")
 }
 
-func submitForNotarization(zipFile, username, password string) (string, error) {
-	bundleID, err := findPrimaryBundleID(zipFile)
+func submitForNotarization(payload, username, password string) (string, error) {
+	bundleID, err := findPrimaryBundleID(payload)
 	if err != nil {
 		return "", err
 	}
-	fmt.Printf("submitting %s for notarization...\n", filepath.Base(zipFile))
+	fmt.Printf("submitting %s for notarization...\n", filepath.Base(payload))
 	var buf bytes.Buffer
 	args := []string{"xcrun", "altool",
 		"--notarize-app",
 		"--primary-bundle-id", bundleID,
 		"--username", username,
 		"--password", password,
-		"--file", zipFile}
+		"--file", payload}
 
 	if *verbose > 0 {
 		args = append(args, "--verbose")
@@ -240,7 +306,7 @@ func waitForNotarization(uuid, username, password string) error {
 	}
 }
 
-func notarizeZip(req notarizationRequest) error {
+func notarizePayload(req notarizationRequest) error {
 	var err error
 	if req.UUID == "" {
 		req.UUID, err = submitForNotarization(req.AppPath, req.Username, req.Password)
@@ -252,34 +318,38 @@ func notarizeZip(req notarizationRequest) error {
 	if err := waitForNotarization(req.UUID, req.Username, req.Password); err != nil {
 		return err
 	}
-	if err := staple(req.AppPath); err != nil {
+	if err := stapleAndVerify(req.AppPath); err != nil {
 		return err
 	}
 	return nil
 }
 
-func unzipApp(appZip string, outputDir string) (string, error) {
-	abs, err := filepath.Abs(appZip)
+func unzipPayload(payload string, outputDir string) (string, bool, error) {
+	abs, err := filepath.Abs(payload)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if err := runCommandOnDir(outputDir, "unzip", abs); err != nil {
-		return "", err
+		return "", false, err
 	}
 	entries, err := ioutil.ReadDir(outputDir)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	for _, v := range entries {
 		name := v.Name()
 		if filepath.Ext(name) == ".app" {
 			fullPath := filepath.Join(outputDir, name)
 			if st, err := os.Stat(fullPath); err == nil && st.IsDir() {
-				return fullPath, nil
+				return fullPath, true, nil
 			}
 		}
 	}
-	return "", fmt.Errorf("couldn't find any .app directories at %s", outputDir)
+	if len(entries) == 1 && filepath.Ext(entries[0].Name()) == "" && isExecutable(entries[0]) {
+		// Single executable, can't be stapled
+		return filepath.Join(outputDir, entries[0].Name()), false, nil
+	}
+	return "", false, fmt.Errorf("couldn't find any .app directories at %s", outputDir)
 }
 
 func makeAppZip(appDir string) (string, error) {
@@ -312,14 +382,14 @@ func notarizeFile(req notarizationRequest) error {
 	ext := filepath.Ext(req.AppPath)
 	switch ext {
 	case ".zip":
-		return notarizeZip(req)
-	case ".app":
+		return notarizePayload(req)
+	case ".app", "":
 		appZip, err := makeAppZip(req.AppPath)
 		if err != nil {
 			return err
 		}
 		req.AppPath = appZip
-		return notarizeZip(req)
+		return notarizePayload(req)
 	default:
 		return fmt.Errorf("can't notarize app in %s format", ext)
 	}
