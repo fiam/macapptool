@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,45 +45,43 @@ func (c *signCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&c.Entitlements, "e", "", "Custom entitlements to use")
 }
 
-func (c *signCmd) signApp(p string) error {
-	var toSign []string
-	err := filepath.Walk(p, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		// If the argument is foo.app/,
-		// filepath.Ext() will return an empty
-		// string. Make sure we don't skip it
-		if strings.HasSuffix(path, "/") {
-			path = path[:len(path)-1]
-		}
-		ext := filepath.Ext(path)
-		if info.IsDir() {
-			if ext == ".app" || ext == ".framework" || ext == ".xpc" {
-				toSign = append(toSign, path)
-			}
-		} else {
-			if ext == ".dylib" {
-				toSign = append(toSign, path)
-			} else {
-				if filepath.Base(filepath.Dir(path)) == "Helpers" {
-					toSign = append(toSign, path)
-				} else if isExecutable(info) {
-					toSign = append(toSign, path)
-				}
-			}
-		}
-		return nil
-	})
+func (c *signCmd) signPath(root, p string) error {
+	st, err := os.Stat(p)
 	if err != nil {
 		return err
 	}
-	// Sign entries in reverse order, since inner bundles need to
-	// be signed before outer ones
-	for ii := len(toSign) - 1; ii >= 0; ii-- {
-		if err := c.signEntry(p, toSign[ii]); err != nil {
+	ext := filepath.Ext(p)
+	var shouldSign bool
+	if st.IsDir() {
+		shouldSign = ext == ".app" || ext == ".framework" || ext == ".xpc"
+		// Inner bundles need to be signed before outer ones
+		entries, err := ioutil.ReadDir(p)
+		if err != nil {
 			return err
 		}
+		for _, v := range entries {
+			if err := c.signPath(root, filepath.Join(p, v.Name())); err != nil {
+				return err
+			}
+		}
+	} else {
+		shouldSign = ext == ".dylib" || filepath.Base(filepath.Dir(p)) == "Helpers" || isExecutable(st)
+	}
+	if shouldSign {
+		return c.signEntry(root, p)
+	}
+	return nil
+}
+
+func (c *signCmd) signApp(p string) error {
+	// If the argument is foo.app/,
+	// filepath.Ext() will return an empty
+	// string. Make sure we don't skip it
+	if strings.HasSuffix(p, "/") {
+		p = p[:len(p)-1]
+	}
+	if err := c.signPath(p, p); err != nil {
+		return err
 	}
 	// Verify signature
 	ext := strings.ToLower(filepath.Ext(p))
